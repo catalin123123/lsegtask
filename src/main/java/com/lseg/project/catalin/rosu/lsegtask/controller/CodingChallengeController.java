@@ -1,19 +1,19 @@
 package com.lseg.project.catalin.rosu.lsegtask.controller;
 
-import com.lseg.project.catalin.rosu.lsegtask.BusinessLogic.AddPredictions;
+import com.lseg.project.catalin.rosu.lsegtask.BusinessLogic.AddPredictionsUsingProvidedLogic;
+import com.lseg.project.catalin.rosu.lsegtask.BusinessLogic.PredictionLogic;
 import com.lseg.project.catalin.rosu.lsegtask.config.RestTemplateConfig;
 import com.lseg.project.catalin.rosu.lsegtask.serdes.CsvRecord;
 import com.lseg.project.catalin.rosu.lsegtask.serdes.WriteResults;
 import com.opencsv.bean.CsvToBean;
 import com.opencsv.bean.CsvToBeanBuilder;
+import jakarta.validation.ConstraintViolationException;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.MediaType;
+import org.springframework.http.*;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RestController;
@@ -40,10 +40,13 @@ public class CodingChallengeController {
     @Autowired
     RestTemplateConfig restTemplateConfig;
 
+    @Autowired
+    PredictionLogic predictionLogic;
     private static final SimpleDateFormat stdDateFormat = new SimpleDateFormat("yyyy-MM-dd HH-mm-ss");
 
     /**
      * 1st API/Function
+     *
      * @return
      * @throws IOException
      */
@@ -80,6 +83,7 @@ public class CodingChallengeController {
 
     /**
      * 2nd API/function
+     *
      * @param filesToBeSampled
      * @return
      * @throws IOException
@@ -91,22 +95,31 @@ public class CodingChallengeController {
         HttpHeaders headers = new HttpHeaders();
         headers.setAccept(Arrays.asList(MediaType.APPLICATION_JSON));
         HttpEntity<Map<String, List<CsvRecord>>> entity = new HttpEntity<Map<String, List<CsvRecord>>>(headers);
+        //make the http call to 1st API/Function that, for each file, returns 10 consecutive data points starting from a random timestamp.
         Map<String, List<LinkedHashMap>> responseFrom1stApi = restTemplateConfig.restTemplate().exchange(url, HttpMethod.GET, entity, HashMap.class).getBody();
         List<String> exchangeList = new ArrayList<>();
-        for (Map.Entry<String, List<LinkedHashMap>> entry : responseFrom1stApi.entrySet()) {
-            String exchange = entry.getKey().toString().substring(0, entry.getKey().toString().indexOf("-"));
-            exchangeList.add(exchange);
-            String instrument = entry.getKey().toString().substring(entry.getKey().toString().indexOf("-") + 1, entry.getKey().toString().indexOf("."));
-            if (exchangeList.stream().filter(e -> e.equals(exchange)).count() <= filesToBeSampled.intValue()) {
-                List<CsvRecord> initialData = entry.getValue().stream().map(e -> new CsvRecord(e.get("stockId").toString(), LocalDate.parse(e.get("timeStamp").toString()), Double.parseDouble(e.get("stockPriceValue").toString()))).collect(Collectors.toList());
-                List<CsvRecord> enrichWithPredictionsData = AddPredictions.addPredictions(initialData);
-                Timestamp timestamp = new Timestamp(System.currentTimeMillis());
-                WriteResults.writeDataAtOnce("src//main//resources//results//" + exchange + "//"
-                        + instrument + "-result"+ stdDateFormat.format(timestamp) +".csv", enrichWithPredictionsData);
+        try {
+            for (Map.Entry<String, List<LinkedHashMap>> entry : responseFrom1stApi.entrySet()) {
+                String exchange = entry.getKey().toString().substring(0, entry.getKey().toString().indexOf("-"));
+                exchangeList.add(exchange);
+                String instrument = entry.getKey().toString().substring(entry.getKey().toString().indexOf("-") + 1, entry.getKey().toString().indexOf("."));
+                if (exchangeList.stream().filter(e -> e.equals(exchange)).count() <= filesToBeSampled.intValue()) {
+                    List<CsvRecord> initialData = entry.getValue().stream().map(e -> new CsvRecord(e.get("stockId").toString(), LocalDate.parse(e.get("timeStamp").toString()), Double.parseDouble(e.get("stockPriceValue").toString()))).collect(Collectors.toList());
+                    List<CsvRecord> enrichWithPredictionsData = predictionLogic.addPredictions(initialData);
+                    Timestamp timestamp = new Timestamp(System.currentTimeMillis());
+                    WriteResults.writeDataAtOnce("src//main//resources//results//" + exchange + "//"
+                            + instrument + "-result" + stdDateFormat.format(timestamp) + ".csv", enrichWithPredictionsData);
+                }
             }
+        } catch (Exception ex) {
+            return ex.getMessage();
         }
-
         return responseFrom1stApi.toString();
+    }
+
+    @ExceptionHandler(ConstraintViolationException.class)
+    public ResponseEntity<String> handleConstraintViolationException(ConstraintViolationException cve) {
+        return new ResponseEntity<>(cve.getMessage(), HttpStatus.BAD_REQUEST);
     }
 
 }

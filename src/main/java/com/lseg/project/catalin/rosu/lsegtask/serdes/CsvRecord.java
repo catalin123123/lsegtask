@@ -5,6 +5,9 @@ import com.opencsv.bean.CsvCustomBindByPosition;
 
 import java.time.LocalDate;
 
+/**
+ * This class will be used to serialize/deserialize the csv records into/as objects of this type
+ */
 public class CsvRecord {
 
     @CsvBindByPosition(position = 0)
